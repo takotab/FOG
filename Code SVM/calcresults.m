@@ -1,4 +1,4 @@
-function [result] = calcresults(outcome,true, name, other_eval_method,multiple_classes,x_count,sampleweight,ws,overlap,confmat)
+function [result] = calcresults(outcome,y_, name, other_eval_method,multiple_classes,x_count,sampleweight,ws,overlap,confmat)
 if nargin == 0
    load('calc_all_results_save.mat') 
 end
@@ -13,7 +13,7 @@ if ~exist('x_count','var')
     x_count = 0;
 end
 if ~exist('sampleweight','var')
-    sampleweight = pi .*ones(size(true));
+    sampleweight = pi .*ones(size(y_));
 end
 if ~exist('other_eval_method','var')
     other_eval_method = 0;
@@ -22,7 +22,7 @@ end
 result.datausage = nan;
 if exist('confmat','var')
     result.confmat = confmat;
-    true(1) = 0;
+    y_(1) = 0;
 else
     result.confmat = [nan, nan;nan, nan];
 end
@@ -35,26 +35,26 @@ result.cost = nan;
 result.matrix_pp_row = [nan,nan,nan];
 result.timeanddat = datetime('now');
 %% calculate results
-if ~isnan(true(1)) 
+if ~isnan(y_(1)) 
  %   try
         if nargin == 2
             name = 'Results';
         end
                 
-        true(isnan(outcome)) = nan;
+        y_(isnan(outcome)) = nan;
         result.datausage = 1-(sum(isnan(outcome))/length(outcome));
         if isnan(result.confmat(1,1))
             if multiple_classes == 1
-                result.confmat = confusionmat(true, outcome);
+                result.confmat = confusionmat(y_, outcome);
             elseif other_eval_method == 1     %bachlin
-                result.confmat = x_countTxFx(true==1, outcome==1,[],[]);
+                result.confmat = x_countTxFx(y_==1, outcome==1,[],[]);
             elseif other_eval_method == 2     %martin
-                result.confmat = eval_martinmethod(true, outcome,ws,overlap);
+                result.confmat = eval_martinmethod(y_, outcome,ws,overlap);
             else
                 if sampleweight(1) ~= pi
-                    result.confmat = confusionmat_sampleweight(true, outcome, sampleweight);
+                    result.confmat = confusionmat_sampleweight(y_, outcome, sampleweight);
                 else
-                    result.confmat = confusionmat(true==1, outcome==1);
+                    result.confmat = confusionmat(y_==1, outcome==1);
                 end
             end
         end

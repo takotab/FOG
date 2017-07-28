@@ -7,8 +7,8 @@ classdef classify_model
     %
     % made by Tako Tabak
     %
-    % last edit 16-06-2017 
-    % to acomidate the exclucion of id s with less FOG episodes than obj.mdl_setting.only_id_with_fog
+    % last edit 29-06-2017 
+    % make ensamler
     
     properties
         windowed_data = nan(1,256,9);
@@ -62,11 +62,12 @@ classdef classify_model
             obj.mdl_setting.num_iterations = 2;
             obj.mdl_setting.featureset = featureset;
             obj.mdl_setting.optimize_hyper_par = 0;
+            obj.mdl_setting.do_th = 0;
             keySet =   {'accel', 'accel+gyro', 'ahlrichs', 'nogait','all','all+','selective','selective+','MBFA'};
             infoSet = {'first 16, only accel bins', 'first 32, accel bins and gyrobins', 'accel bins + 13 features', 'everything exept the gaitcharacteristics descripted by rispens et al.','all features, \nincl the interpolated gaitcharacteristics excl. not interpolated ones (73:76)','everything','only the ones that show an imporatnce above std','only the ones that show an importance above std \nexept that now the gaitfeatures are just over the window\n and not interpolated from 10 seconds','Freeze index and the energy level (44:45)'};
             numberSet = {1:16, 1:32,[1:16 33:45], 1:48,1:72,1:77,[1 2 3 4 5 6 7 11 12 13 14 15 18 30 33 34 35 36 37 38 40 50 66],...
                 [1 2 3 4 5 6 7 11 12 13 14 15 18 30 33 34 35 36 37 38 40 75 76],[44:45]};
-            optimal_hyper = {[1 1],[1 1],[1 1],[1 1],[1 1],[1 1],[1 1],[1 1],[1 1]};
+            optimal_hyper = {[2.2113 3.2067],[1.0575e3 929.0905],[2.3125 0.4875],[1 1],[1.1960 2.4417],[1 1],[41.4859 4.4986],[1 1],[1 1]};
             %optimal_hyper(1) = box constrained 
             %optimal_hyper(2) = kernel size
             obj.mdl_setting.featureinfo = containers.Map(keySet,infoSet);
@@ -307,7 +308,7 @@ classdef classify_model
             trainX = split_dataset.TrainX(:,obj.mdl_setting.featurenumbers(obj.mdl_setting.featureset)+1);
             
             %change variblenames
-            obj.variblenames = obj.variblenames(obj.mdl_setting.featurenumbers(obj.mdl_setting.featureset)+1);
+            obj.variblenames = obj.variblenames(obj.mdl_setting.featurenumbers(obj.mdl_setting.featureset));
             
             if obj.mdl_setting.lda == 1 %LDA
                 [l,v] = lda_t(trainX,split_dataset.TrainY);
@@ -318,9 +319,12 @@ classdef classify_model
                 
             end
             
-            
+            if obj.mdl_setting.zscore
+               trainX = zscore(trainX); 
+            end
             obj.mdl_setting.svm.cost = [ 0, sum(split_dataset.TrainY);sum(1-split_dataset.TrainY) 0];
-
+            
+            obj.mdl_setting.hyper_parameters = obj.mdl_setting.optimal_hyper(obj.mdl_setting.featureset);
             
             fprintf('\nFeatureset = %s\twith %i features\n',obj.mdl_setting.featureset,size(trainX,2))
             
@@ -355,10 +359,11 @@ classdef classify_model
                 else
                     %% normal
                     fprintf('Start SVM \nwith %i GB of cachesize and %i number of iterations\n', obj.mdl_setting.cachesize/1000, obj.mdl_setting.num_iterations);
-
-                        obj.mdl_setting.svm.Mdl = fitcsvm(trainX,split_dataset.TrainY,'Cost',obj.mdl_setting.svm.cost,'ClassNames',[0 1],...
-                            'CacheSize',obj.mdl_setting.cachesize,'Verbose',1,'IterationLimit',obj.mdl_setting.num_iterations,...
-                            'BoxConstraint',obj.mdl_setting.hyper_parameters(1),'KernelScale',obj.mdl_setting.hyper_parameters(2));
+                    
+                    obj.mdl_setting.svm.Mdl = fitcsvm(trainX,split_dataset.TrainY,'Cost',obj.mdl_setting.svm.cost,'ClassNames',[0 1],...
+                        'CacheSize',obj.mdl_setting.cachesize,'Verbose',1,'IterationLimit',obj.mdl_setting.num_iterations,...
+                        'BoxConstraint',obj.mdl_setting.hyper_parameters(1),'KernelScale',obj.mdl_setting.hyper_parameters(2));
+                    
 
                 end
             else % individidual case
@@ -379,12 +384,24 @@ classdef classify_model
                 
                 predicted_Y_train = obj.mdl_setting.score_y.predicted_Y_train;
                 results_training = obj.mdl_setting.score_y.results_training;
+                
+                if obj.mdl_setting.th.do == 1
+                    [obj.mdl_setting.th.th2star, obj.mdl_setting.th.f_eval, obj.mdl_setting.th.results_training] = optimize_THA(...
+                        split_dataset.TrainY,[],obj.mdl_setting.score_y.predicted_Y_train,100);
+                    
+                    predicted_Y_train = obj.mdl_setting.score_y.predicted_Y_train;
+                    results_training = obj.mdl_setting.score_y.results_training;
+                end
             else
                 
                 predicted_Y_train = obj.mdl_setting.svm.predicted_Y_train;
                 results_training = obj.mdl_setting.svm.results_training;
             end
             
+        end
+        %%
+        function [obj] = fit_ensemble(obj, x, y)
+           Mdl = fitcensemble(x,y,'CategoricalPredictors',[1 1 1 1],'CrossVal','on','ClassNames',{'nFOG','FOG'}) 
         end
         %%
         function [f_eval, box_ker_star ] = optimize_svm(obj, x, y, box_ker)
@@ -438,6 +455,11 @@ classdef classify_model
             if obj.mdl_setting.score_y.do == 1
                 
                 [y_predicted] = eval_scorey(obj.mdl_setting.score_y.th, y_predict_score);
+                
+                 if obj.mdl_setting.th.do == 1
+                     y_predicted = thresholdsSVMAhlrichs(y_predicted,obj.mdl_setting.th.th2star,'forwards');
+
+                 end
             end
             result = calcresults(y_predicted,test_dataY,name);
 
@@ -447,6 +469,7 @@ classdef classify_model
             if ~exist('name','var');name = 'Result test';end
             result.bachlin = calcresults(y_predicted,test_dataY,[name ' bachlin'],1);
             result.martin = calcresults(y_predicted,FOGtime,[name ' martin'],2,[],[],[],obj.windowlength_sec,obj.windowlength_sec*obj.overlap_percentages);
+            result.tabak = calcresults(y_predicted,FOGtime,[name ' tabak'],3,[],[],[],obj.window_length_frame,obj.overlap_percentages);
         end
         %%
         function obj = calc_gait_characteristics(obj, data)
@@ -457,7 +480,7 @@ classdef classify_model
             for epoch = 1:N10secEpochs
                 [LocomotionMeasures(epoch).Measures] = GaitQualityFromTrunkAccelerations(data((epoch-1)*10*obj.sample_frequency+1:epoch*10*obj.sample_frequency,2:4),obj.sample_frequency,[0 0],0.00001,0);
                 
-                if toc > obj.verbrose_setting.wait_time && epoch/obj.verbrose_setting.num_of_windows == floor(epoch/obj.verbrose_setting.num_of_windows)
+                if epoch/obj.verbrose_setting.num_of_windows == floor(epoch/obj.verbrose_setting.num_of_windows)
                     
                     fprintf('num of 10sec epochs done/total: %i/%i\n',epoch,N10secEpochs)
                 end
